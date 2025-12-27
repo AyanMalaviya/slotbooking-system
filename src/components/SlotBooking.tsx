@@ -51,10 +51,11 @@ export default function SlotBooking() {
 
   const checkUserSlot = () => {
     const userSlot = slots.find(
-      (slot) => slot.creator_name === userName && slot.status === 'active'
+      (slot) => slot.creator_name.toLowerCase() === userName.toLowerCase() && slot.status === 'active'
     );
     setHasActiveSlot(!!userSlot);
   };
+
 
   const fetchSlots = async () => {
     const today = new Date();
@@ -124,7 +125,7 @@ export default function SlotBooking() {
 
   const handleCancelSlot = async () => {
     const userSlot = slots.find(
-      (slot) => slot.creator_name === userName && slot.status === 'active'
+      (slot) => slot.creator_name.toLowerCase() === userName.toLowerCase() && slot.status === 'active'
     );
 
     if (!userSlot) return;
@@ -145,15 +146,18 @@ export default function SlotBooking() {
     }
   };
 
+
   const isUserInSlot = (slot: Slot) => {
+    const lowerUserName = userName.toLowerCase();
     return (
-      slot.player1 === userName ||
-      slot.player2 === userName ||
-      slot.player3 === userName ||
-      slot.player4 === userName ||
-      slot.substitute === userName
+      slot.player1.toLowerCase() === lowerUserName ||
+      slot.player2.toLowerCase() === lowerUserName ||
+      slot.player3.toLowerCase() === lowerUserName ||
+      slot.player4.toLowerCase() === lowerUserName ||
+      slot.substitute.toLowerCase() === lowerUserName
     );
   };
+
 
   const getNextAvailablePosition = (slot: Slot) => {
     if (!slot.player2) return 'player2';
@@ -191,7 +195,7 @@ export default function SlotBooking() {
     if (!slot) return;
 
     // Don't allow creator to leave their own slot
-    if (slot.creator_name === userName) {
+    if (slot.creator_name.toLowerCase() === userName.toLowerCase()) {
       alert('You cannot leave your own slot! Cancel the slot instead.');
       return;
     }
@@ -201,10 +205,12 @@ export default function SlotBooking() {
 
     try {
       const updates: any = {};
-      if (slot.player2 === userName) updates.player2 = '';
-      if (slot.player3 === userName) updates.player3 = '';
-      if (slot.player4 === userName) updates.player4 = '';
-      if (slot.substitute === userName) updates.substitute = '';
+      const lowerUserName = userName.toLowerCase();
+      
+      if (slot.player2.toLowerCase() === lowerUserName) updates.player2 = '';
+      if (slot.player3.toLowerCase() === lowerUserName) updates.player3 = '';
+      if (slot.player4.toLowerCase() === lowerUserName) updates.player4 = '';
+      if (slot.substitute.toLowerCase() === lowerUserName) updates.substitute = '';
 
       const { error } = await supabase
         .from('slots')
@@ -217,6 +223,7 @@ export default function SlotBooking() {
       alert(err.message);
     }
   };
+
 
   const getCurrentTime = () => {
     const now = new Date();
