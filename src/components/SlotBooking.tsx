@@ -240,61 +240,6 @@ export default function SlotBooking() {
     });
   };
 
-  // Logo Component
-  const Logo = () => (
-    <svg className="w-10 h-10 sm:w-12 sm:h-12" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="50" cy="50" r="48" fill="#000000" stroke="#EAB308" strokeWidth="3"/>
-      <path d="M50 20L55 35H70L58 45L63 60L50 50L37 60L42 45L30 35H45L50 20Z" fill="#EAB308"/>
-      <path d="M50 50L45 65L50 80L55 65L50 50Z" fill="#F59E0B"/>
-      <circle cx="50" cy="35" r="3" fill="#FCD34D"/>
-    </svg>
-  );
-
-  // // If user hasn't set their name yet
-  // if (!userName) {
-  //   return (
-  //     <div className="min-h-screen bg-black flex items-center justify-center p-4">
-  //       <div className="bg-gradient-to-br from-gray-900 to-black rounded-lg shadow-2xl p-8 w-full max-w-md border-2 border-yellow-500">
-  //         <div className="flex justify-center mb-4">
-  //           <Logo />
-  //         </div>
-  //         <h1 className="text-3xl font-bold text-center mb-2 text-yellow-500">
-  //           ETHICAL FIRE
-  //         </h1>
-  //         <p className="text-center text-yellow-400 mb-6 font-semibold">Enter Your Name to Continue</p>
-
-  //         <div className="space-y-4">
-  //           <div>
-  //             <label className="block text-sm font-bold text-yellow-400 mb-2">
-  //               Your Name
-  //             </label>
-  //             <input
-  //               type="text"
-  //               value={nameInput}
-  //               onChange={(e) => setNameInput(e.target.value)}
-  //               placeholder="Enter your full name"
-  //               className="w-full px-4 py-3 bg-black border-2 border-yellow-500 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 text-white placeholder-gray-600"
-  //               onKeyPress={(e) => {
-  //                 if (e.key === 'Enter' && nameInput.trim()) {
-  //                   handleNameSubmit();
-  //                 }
-  //               }}
-  //             />
-  //           </div>
-
-  //           <button
-  //             type="button"
-  //             onClick={handleNameSubmit}
-  //             disabled={!nameInput.trim()}
-  //             className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-black py-3 rounded-lg font-bold hover:from-yellow-400 hover:to-yellow-500 transition shadow-lg border-2 border-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed"
-  //           >
-  //             Continue
-  //           </button>
-  //         </div>
-  //       </div>
-  //     </div>
-  //   );
-  // }
 
     // Blocked users list
   const blockedUsers: string[] = ['yash', 'yash patel', 'py', 'pyop']; // Change these names
@@ -314,7 +259,7 @@ export default function SlotBooking() {
       <div className="min-h-screen bg-black flex items-center justify-center p-4">
         <div className="bg-gradient-to-br from-gray-900 to-black rounded-lg shadow-2xl p-8 w-full max-w-md border-2 border-yellow-500">
           <div className="flex justify-center mb-4">
-            <Logo />
+            <img src="/EF.jpg" alt="Ethical Fire Logo" className="w-20 h-20 rounded-full border-4 border-yellow-500" />
           </div>
           <h1 className="text-3xl font-bold text-center mb-2 text-yellow-500">
             ETHICAL FIRE
@@ -451,7 +396,7 @@ export default function SlotBooking() {
           {/* Top Row - Logo, Title and User Info */}
           <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-3">
             <div className="flex items-center gap-3">
-              <Logo />
+              <img src="/EF.jpg" alt="Ethical Fire Logo" className="w-12 h-12 sm:w-16 sm:h-16 rounded-full border-4 border-yellow-500" />
               <div>
                 <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-wide">
                   ETHICAL FIRE
