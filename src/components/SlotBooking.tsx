@@ -57,6 +57,10 @@ export default function SlotBooking() {
   };
 
   const fetchSlots = async () => {
+    // Delete expired slots first
+    await supabase.rpc('delete_expired_slots');
+    
+    // Then fetch remaining slots
     const { data, error } = await supabase
       .from('slots')
       .select('*')
@@ -69,6 +73,7 @@ export default function SlotBooking() {
     
     if (data) setSlots(data);
   };
+
 
   const handleNameSubmit = () => {
     if (nameInput.trim()) {
