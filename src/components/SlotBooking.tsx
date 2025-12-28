@@ -13,10 +13,6 @@ export default function SlotBooking() {
   // Real-time notification
   const [recentSlot, setRecentSlot] = useState<Slot | null>(null);
 
-  // Settings modal
-  const [showSettings, setShowSettings] = useState(false);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-
   // Edit slot state
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editTime, setEditTime] = useState('');
