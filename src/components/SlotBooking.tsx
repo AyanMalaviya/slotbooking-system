@@ -7,24 +7,36 @@ export default function SlotBooking() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [userName, setUserName] = useState('');
-  const [nameInput, setNameInput] = useState('');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasActiveSlot, setHasActiveSlot] = useState(false);
+
+  // Login/Register states
+  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [registerUsername, setRegisterUsername] = useState('');
+  const [registerPassword, setRegisterPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
 
   const [formData, setFormData] = useState({
     start_time: '',
   });
 
   useEffect(() => {
-    // Get stored username from localStorage
-    const storedName = localStorage.getItem('bgmi_user_name');
-    if (storedName) {
-      setUserName(storedName);
-      setNameInput(storedName);
+    // Check if user is logged in
+    const storedUsername = localStorage.getItem('bgmi_username');
+    const storedAuth = localStorage.getItem('bgmi_authenticated');
+    
+    if (storedUsername && storedAuth === 'true') {
+      setUserName(storedUsername);
+      setIsAuthenticated(true);
     }
 
     fetchSlots();
 
-    // Auto-refresh every minute to cancel expired slots
+    // Auto-refresh every minute
     const interval = setInterval(() => {
       fetchSlots();
     }, 60000);
@@ -44,10 +56,10 @@ export default function SlotBooking() {
   }, []);
 
   useEffect(() => {
-    if (userName) {
+    if (userName && isAuthenticated) {
       checkUserSlot();
     }
-  }, [userName, slots]);
+  }, [userName, slots, isAuthenticated]);
 
   const checkUserSlot = () => {
     const userSlot = slots.find(
@@ -55,7 +67,6 @@ export default function SlotBooking() {
     );
     setHasActiveSlot(!!userSlot);
   };
-
 
   const fetchSlots = async () => {
     const today = new Date();
@@ -76,11 +87,114 @@ export default function SlotBooking() {
     if (data) setSlots(data);
   };
 
-  const handleNameSubmit = () => {
-    if (nameInput.trim()) {
-      localStorage.setItem('bgmi_user_name', nameInput.trim());
-      setUserName(nameInput.trim());
+  // Handle Login
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    try {
+      // Check if user exists and password matches
+      const { data, error } = await supabase
+        .from('user_credentials')
+        .select('*')
+        .eq('username', loginUsername.toLowerCase())
+        .single();
+
+      if (error || !data) {
+        setAuthError('Username not found. Please register first.');
+        setAuthLoading(false);
+        return;
+      }
+
+      // Simple password check (in production, use proper hashing like bcrypt)
+      if (data.password_hash !== loginPassword) {
+        setAuthError('Incorrect password!');
+        setAuthLoading(false);
+        return;
+      }
+
+      // Login successful
+      localStorage.setItem('bgmi_username', loginUsername);
+      localStorage.setItem('bgmi_authenticated', 'true');
+      setUserName(loginUsername);
+      setIsAuthenticated(true);
+      
+    } catch (err: any) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
     }
+  };
+
+  // Handle Registration
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    setAuthLoading(true);
+
+    // Validation
+    if (registerPassword !== confirmPassword) {
+      setAuthError('Passwords do not match!');
+      setAuthLoading(false);
+      return;
+    }
+
+    if (registerPassword.length < 6) {
+      setAuthError('Password must be at least 6 characters long!');
+      setAuthLoading(false);
+      return;
+    }
+
+    if (registerUsername.length < 3) {
+      setAuthError('Username must be at least 3 characters long!');
+      setAuthLoading(false);
+      return;
+    }
+
+    try {
+      // Check if username already exists
+      const { data: existingUser } = await supabase
+        .from('user_credentials')
+        .select('username')
+        .eq('username', registerUsername.toLowerCase())
+        .single();
+
+      if (existingUser) {
+        setAuthError('Username already taken. Please choose another.');
+        setAuthLoading(false);
+        return;
+      }
+
+      // Register new user (in production, hash the password properly)
+      const { error } = await supabase
+        .from('user_credentials')
+        .insert({
+          username: registerUsername.toLowerCase(),
+          password_hash: registerPassword, // In production, use bcrypt or similar
+        });
+
+      if (error) throw error;
+
+      // Auto-login after registration
+      localStorage.setItem('bgmi_username', registerUsername);
+      localStorage.setItem('bgmi_authenticated', 'true');
+      setUserName(registerUsername);
+      setIsAuthenticated(true);
+      
+    } catch (err: any) {
+      setAuthError(err.message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  // Handle Logout
+  const handleLogout = () => {
+    localStorage.removeItem('bgmi_username');
+    localStorage.removeItem('bgmi_authenticated');
+    setUserName('');
+    setIsAuthenticated(false);
   };
 
   const handleSlotSubmit = async (e: React.FormEvent) => {
@@ -94,7 +208,6 @@ export default function SlotBooking() {
     setLoading(true);
 
     try {
-      // Combine today's date with selected time
       const today = new Date();
       const [hours, minutes] = formData.start_time.split(':');
       today.setHours(parseInt(hours), parseInt(minutes), 0, 0);
@@ -146,7 +259,6 @@ export default function SlotBooking() {
     }
   };
 
-
   const isUserInSlot = (slot: Slot) => {
     const lowerUserName = userName.toLowerCase();
     return (
@@ -157,7 +269,6 @@ export default function SlotBooking() {
       slot.substitute.toLowerCase() === lowerUserName
     );
   };
-
 
   const getNextAvailablePosition = (slot: Slot) => {
     if (!slot.player2) return 'player2';
@@ -170,6 +281,11 @@ export default function SlotBooking() {
   const handleJoinSlot = async (slotId: string) => {
     const slot = slots.find((s) => s.id === slotId);
     if (!slot) return;
+
+    if (isUserInSlot(slot)) {
+      alert('You are already in this slot!');
+      return;
+    }
 
     const nextPosition = getNextAvailablePosition(slot);
     if (!nextPosition) {
@@ -194,7 +310,6 @@ export default function SlotBooking() {
     const slot = slots.find((s) => s.id === slotId);
     if (!slot) return;
 
-    // Don't allow creator to leave their own slot
     if (slot.creator_name.toLowerCase() === userName.toLowerCase()) {
       alert('You cannot leave your own slot! Cancel the slot instead.');
       return;
@@ -224,7 +339,6 @@ export default function SlotBooking() {
     }
   };
 
-
   const getCurrentTime = () => {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -240,154 +354,165 @@ export default function SlotBooking() {
     });
   };
 
-
-    // Blocked users list
-  const blockedUsers: string[] = ['yash', 'yash patel', 'py', 'pyop']; // Change these names
-  const botUsers: string[] = ['aryan','aryan lakhani', 'don']; // Change this name
-
-  const normalizedUserName = userName.toLowerCase();
-  const isBlocked = blockedUsers.some(name => 
-    normalizedUserName.includes(name.toLowerCase())
-  );
-  const isBot = botUsers.some(name => 
-    normalizedUserName.includes(name.toLowerCase())
-  );
-
-  // If user hasn't set their name yet
-  if (!userName) {
+  // Login/Register Screen
+  if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center p-4">
         <div className="bg-gradient-to-br from-gray-900 to-black rounded-lg shadow-2xl p-8 w-full max-w-md border-2 border-yellow-500">
           <div className="flex justify-center mb-4">
-            <img src="/EF.jpg" alt="Ethical Fire Logo" className="w-20 h-20 rounded-full border-4 border-yellow-500" />
+            <img 
+              src="/EF.jpg" 
+              alt="Ethical Fire Logo" 
+              className="w-16 h-16 sm:w-20 sm:h-20 rounded-full object-cover border-2 border-yellow-500"
+            />
           </div>
           <h1 className="text-3xl font-bold text-center mb-2 text-yellow-500">
             ETHICAL FIRE
           </h1>
-          <p className="text-center text-yellow-400 mb-6 font-semibold">Enter Your Name to Continue</p>
+          <p className="text-center text-yellow-400 mb-6 font-semibold">
+            {isLoginMode ? 'Login to Continue' : 'Create Your Account'}
+          </p>
 
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-bold text-yellow-400 mb-2">
-                Your Name
-              </label>
-              <input
-                type="text"
-                value={nameInput}
-                onChange={(e) => setNameInput(e.target.value)}
-                placeholder="Enter your full name"
-                className="w-full px-4 py-3 bg-black border-2 border-yellow-500 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 text-white placeholder-gray-600"
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter' && nameInput.trim()) {
-                    handleNameSubmit();
-                  }
-                }}
-              />
-            </div>
-
+          {/* Toggle Login/Register */}
+          <div className="flex gap-2 mb-6">
             <button
-              type="button"
-              onClick={handleNameSubmit}
-              disabled={!nameInput.trim()}
-              className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-black py-3 rounded-lg font-bold hover:from-yellow-400 hover:to-yellow-500 transition shadow-lg border-2 border-yellow-400 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => {
+                setIsLoginMode(true);
+                setAuthError('');
+              }}
+              className={`flex-1 py-2 rounded-lg font-bold transition ${
+                isLoginMode
+                  ? 'bg-yellow-500 text-black'
+                  : 'bg-gray-800 text-gray-400'
+              }`}
             >
-              Continue
+              Login
+            </button>
+            <button
+              onClick={() => {
+                setIsLoginMode(false);
+                setAuthError('');
+              }}
+              className={`flex-1 py-2 rounded-lg font-bold transition ${
+                !isLoginMode
+                  ? 'bg-yellow-500 text-black'
+                  : 'bg-gray-800 text-gray-400'
+              }`}
+            >
+              Register
             </button>
           </div>
+
+          {/* Login Form */}
+          {isLoginMode ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-yellow-400 mb-2">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={loginUsername}
+                  onChange={(e) => setLoginUsername(e.target.value)}
+                  required
+                  placeholder="Enter your username"
+                  className="w-full px-4 py-3 bg-black border-2 border-yellow-500 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 text-white placeholder-gray-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-yellow-400 mb-2">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  required
+                  placeholder="Enter your password"
+                  className="w-full px-4 py-3 bg-black border-2 border-yellow-500 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 text-white placeholder-gray-600"
+                />
+              </div>
+
+              {authError && (
+                <div className="bg-red-900 bg-opacity-50 border-2 border-red-500 text-red-300 p-3 rounded-lg text-sm">
+                  {authError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-black py-3 rounded-lg font-bold hover:from-yellow-400 hover:to-yellow-500 transition shadow-lg border-2 border-yellow-400 disabled:opacity-50"
+              >
+                {authLoading ? 'Logging in...' : 'Login'}
+              </button>
+            </form>
+          ) : (
+            /* Register Form */
+            <form onSubmit={handleRegister} className="space-y-4">
+              <div>
+                <label className="block text-sm font-bold text-yellow-400 mb-2">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={registerUsername}
+                  onChange={(e) => setRegisterUsername(e.target.value)}
+                  required
+                  placeholder="Choose a username"
+                  className="w-full px-4 py-3 bg-black border-2 border-yellow-500 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 text-white placeholder-gray-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-yellow-400 mb-2">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={registerPassword}
+                  onChange={(e) => setRegisterPassword(e.target.value)}
+                  required
+                  placeholder="Create a password (min 6 characters)"
+                  className="w-full px-4 py-3 bg-black border-2 border-yellow-500 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 text-white placeholder-gray-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-yellow-400 mb-2">
+                  Confirm Password
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  required
+                  placeholder="Re-enter your password"
+                  className="w-full px-4 py-3 bg-black border-2 border-yellow-500 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 text-white placeholder-gray-600"
+                />
+              </div>
+
+              {authError && (
+                <div className="bg-red-900 bg-opacity-50 border-2 border-red-500 text-red-300 p-3 rounded-lg text-sm">
+                  {authError}
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-gradient-to-r from-yellow-500 to-yellow-600 text-black py-3 rounded-lg font-bold hover:from-yellow-400 hover:to-yellow-500 transition shadow-lg border-2 border-yellow-400 disabled:opacity-50"
+              >
+                {authLoading ? 'Creating Account...' : 'Create Account'}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
   }
 
-  // If user is blocked
-  if (isBlocked) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
-        <div className="bg-gradient-to-br from-red-900 to-black rounded-lg shadow-2xl p-8 w-full max-w-md border-2 border-red-500">
-          <div className="flex justify-center mb-4">
-            <svg className="w-20 h-20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="50" cy="50" r="48" fill="#000000" stroke="#EF4444" strokeWidth="3"/>
-              <path d="M30 30L70 70M70 30L30 70" stroke="#EF4444" strokeWidth="8" strokeLinecap="round"/>
-            </svg>
-          </div>
-          <h1 className="text-3xl font-bold text-center mb-4 text-red-500">
-            ACCESS DENIED
-          </h1>
-          <p className="text-center text-red-400 mb-6 font-bold text-xl">
-            Gand marao, nathi ramadvo tane
-          </p>
-          <p className="text-center text-gray-400 mb-8 text-sm">
-            User: {userName}
-          </p>
-
-          <div className="space-y-3">
-            <button
-              onClick={() => {
-                // Just show alert, don't let them play
-                alert('Nathi ramadvo! 😂');
-              }}
-              className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white py-3 rounded-lg font-bold hover:from-red-500 hover:to-red-600 transition shadow-lg border-2 border-red-500"
-            >
-              Try to Play Anyway
-            </button>
-
-            <button
-              onClick={() => {
-                localStorage.removeItem('bgmi_user_name');
-                setUserName('');
-                setNameInput('');
-              }}
-              className="w-full bg-gradient-to-r from-gray-600 to-gray-700 text-white py-3 rounded-lg font-bold hover:from-gray-500 hover:to-gray-600 transition shadow-lg border-2 border-gray-500"
-            >
-              Change Name
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // If user is bot
-  if (isBot) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4">
-        <div className="bg-gradient-to-br from-purple-900 to-black rounded-lg shadow-2xl p-8 w-full max-w-md border-2 border-purple-500">
-          <div className="flex justify-center mb-4">
-            <svg className="w-20 h-20" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="50" cy="50" r="48" fill="#000000" stroke="#A855F7" strokeWidth="3"/>
-              <rect x="30" y="35" width="15" height="15" fill="#A855F7" rx="2"/>
-              <rect x="55" y="35" width="15" height="15" fill="#A855F7" rx="2"/>
-              <path d="M35 65Q50 75 65 65" stroke="#A855F7" strokeWidth="4" strokeLinecap="round" fill="none"/>
-              <rect x="45" y="20" width="10" height="8" fill="#A855F7"/>
-              <circle cx="50" cy="20" r="3" fill="#FCD34D"/>
-            </svg>
-          </div>
-          <h1 className="text-3xl font-bold text-center mb-4 text-purple-500">
-            BOT DETECTED
-          </h1>
-          <p className="text-center text-purple-400 mb-6 font-bold text-xl">
-            Aa bot haaylo aayvo
-          </p>
-          <p className="text-center text-gray-400 mb-8 text-sm">
-            User: {userName}
-          </p>
-
-          <div className="space-y-3">
-            <button
-              onClick={() => {
-                localStorage.removeItem('bgmi_user_name');
-                setUserName('');
-                setNameInput('');
-              }}
-              className="w-full bg-gradient-to-r from-purple-600 to-purple-700 text-white py-3 rounded-lg font-bold hover:from-purple-500 hover:to-purple-600 transition shadow-lg border-2 border-purple-500"
-            >
-              Change Name
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
   return (
     <div className="min-h-screen bg-black">
       {/* Header */}
@@ -396,7 +521,11 @@ export default function SlotBooking() {
           {/* Top Row - Logo, Title and User Info */}
           <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-3">
             <div className="flex items-center gap-3">
-              <img src="/EF.jpg" alt="Ethical Fire Logo" className="w-12 h-12 sm:w-16 sm:h-16 rounded-full border-4 border-yellow-500" />
+              <img 
+                src="/EF.jpg" 
+                alt="Ethical Fire Logo" 
+                className="w-10 h-10 sm:w-12 sm:h-12 rounded-full object-cover border-2 border-yellow-500"
+              />
               <div>
                 <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-wide">
                   ETHICAL FIRE
@@ -411,14 +540,10 @@ export default function SlotBooking() {
                 <p className="text-xs text-yellow-900">Logged in as</p>
                 <p className="font-bold text-sm md:text-base">{userName}</p>
                 <button
-                  onClick={() => {
-                    localStorage.removeItem('bgmi_user_name');
-                    setUserName('');
-                    setNameInput('');
-                  }}
+                  onClick={handleLogout}
                   className="text-xs text-yellow-900 hover:text-black underline"
                 >
-                  Change Name
+                  Logout
                 </button>
               </div>
             </div>
@@ -524,7 +649,7 @@ export default function SlotBooking() {
             const userInSlot = isUserInSlot(slot);
             const nextPosition = getNextAvailablePosition(slot);
             const isFull = !nextPosition;
-            const isCreator = slot.creator_name === userName;
+            const isCreator = slot.creator_name.toLowerCase() === userName.toLowerCase();
 
             return (
               <div
