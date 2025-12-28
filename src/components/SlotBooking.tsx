@@ -10,6 +10,13 @@ export default function SlotBooking() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasActiveSlot, setHasActiveSlot] = useState(false);
 
+  // Real-time notification
+  const [recentSlot, setRecentSlot] = useState<Slot | null>(null);
+
+  // Settings modal
+  const [showSettings, setShowSettings] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
   // Edit slot state
   const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
   const [editTime, setEditTime] = useState('');
@@ -50,11 +57,29 @@ export default function SlotBooking() {
       fetchSlots();
     }, 60000);
 
+    // Real-time subscription with insert detection
     const channel = supabase
       .channel('slots-changes')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'slots' }, () => {
-        fetchSlots();
-      })
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'slots' }, 
+        (payload) => {
+          const newSlot = payload.new as Slot;
+          if (newSlot.creator_name !== storedUsername) {
+            setRecentSlot(newSlot);
+            // Play notification sound
+            playNotificationSound();
+            // Auto-hide after 15 seconds
+            setTimeout(() => setRecentSlot(null), 15000);
+          }
+          fetchSlots();
+        }
+      )
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'slots' }, 
+        () => {
+          fetchSlots();
+        }
+      )
       .subscribe();
 
     return () => {
@@ -68,6 +93,25 @@ export default function SlotBooking() {
       checkUserSlot();
     }
   }, [userName, slots, isAuthenticated]);
+
+  const playNotificationSound = () => {
+    // Create notification sound
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.frequency.value = 800;
+    oscillator.type = 'sine';
+    
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+    
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.5);
+  };
 
   const checkUserSlot = () => {
     const userSlot = slots.find(
@@ -172,6 +216,7 @@ export default function SlotBooking() {
         .insert({
           username: registerUsername.toLowerCase(),
           password_hash: registerPassword,
+          notifications_enabled: true,
         });
 
       if (error) throw error;
@@ -199,7 +244,7 @@ export default function SlotBooking() {
     e.preventDefault();
     
     if (hasActiveSlot) {
-      alert('You already have an active slot! Cancel it first to create a new one.');
+      alert('You already have an active slot! Delete it first to create a new one.');
       return;
     }
 
@@ -222,6 +267,7 @@ export default function SlotBooking() {
         player3_comment: '',
         player4_comment: '',
         waiting_queue: [],
+        notification_sent: false,
       });
 
       if (error) throw error;
@@ -238,7 +284,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Leave slot - only remove user's name
   const handleLeaveSlot = async (slotId: string) => {
     const slot = slots.find((s) => s.id === slotId);
     if (!slot) return;
@@ -280,7 +325,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Creator can remove themselves from player1
   const handleRemoveSelfAsCreator = async (slotId: string) => {
     const confirmRemove = window.confirm('Remove yourself as Player 1? The slot will remain active.');
     if (!confirmRemove) return;
@@ -301,7 +345,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Delete entire slot (only creator)
   const handleDeleteSlot = async (slotId: string) => {
     const confirmDelete = window.confirm('Delete this entire slot? This cannot be undone!');
     if (!confirmDelete) return;
@@ -319,7 +362,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Edit slot time
   const handleEditSlotTime = async (slotId: string) => {
     if (!editTime) return;
 
@@ -343,7 +385,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Save comment
   const handleSaveComment = async (slotId: string, player: string) => {
     try {
       const commentField = `${player}_comment`;
@@ -362,7 +403,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Join waiting queue
   const handleJoinWaitingQueue = async (slotId: string) => {
     const slot = slots.find((s) => s.id === slotId);
     if (!slot) return;
@@ -386,7 +426,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Leave waiting queue
   const handleLeaveWaitingQueue = async (slotId: string) => {
     const slot = slots.find((s) => s.id === slotId);
     if (!slot) return;
@@ -464,15 +503,6 @@ export default function SlotBooking() {
       day: 'numeric' 
     });
   };
-
-  // const getPlayerPosition = (slot: Slot, username: string): string | null => {
-  //   const lowerUserName = username.toLowerCase();
-  //   if (slot.player1.toLowerCase() === lowerUserName) return 'player1';
-  //   if (slot.player2.toLowerCase() === lowerUserName) return 'player2';
-  //   if (slot.player3.toLowerCase() === lowerUserName) return 'player3';
-  //   if (slot.player4.toLowerCase() === lowerUserName) return 'player4';
-  //   return null;
-  // };
 
   // Login/Register Screen
   if (!isAuthenticated) {
@@ -632,6 +662,42 @@ export default function SlotBooking() {
 
   return (
     <div className="min-h-screen bg-black">
+      {/* Real-time Notification Banner */}
+      {recentSlot && (
+        <div className="fixed top-20 right-4 left-4 sm:left-auto sm:w-96 z-50 bg-gradient-to-r from-green-600 to-green-700 text-white p-4 rounded-lg shadow-2xl border-2 border-green-500 animate-bounce">
+          <div className="flex justify-between items-start">
+            <div className="flex-1">
+              <p className="font-bold text-lg flex items-center gap-2">
+                <span>🆕</span>
+                <span>New Slot Created!</span>
+              </p>
+              <p className="text-sm mt-1">
+                Time: {new Date(recentSlot.start_time).toLocaleTimeString('en-IN', {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </p>
+              <p className="text-sm">By: {recentSlot.creator_name}</p>
+              <button
+                onClick={() => {
+                  setRecentSlot(null);
+                  window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+                }}
+                className="mt-2 bg-white text-green-700 px-3 py-1 rounded font-bold text-xs hover:bg-gray-100 transition"
+              >
+                View Slot ↓
+              </button>
+            </div>
+            <button
+              onClick={() => setRecentSlot(null)}
+              className="text-white hover:text-gray-200 font-bold text-xl ml-2"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-gradient-to-r from-yellow-600 via-yellow-500 to-yellow-600 text-black shadow-2xl border-b-4 border-yellow-400">
         <div className="container mx-auto px-4 py-4">
@@ -692,8 +758,11 @@ export default function SlotBooking() {
       </header>
 
       <div className="container mx-auto p-4 sm:p-6">
-        {/* Create Slot Button */}
-        <div className="mb-6">
+        {/* Rest of the slots code continues as before... */}
+        {/* I'll continue in next message due to length */}
+
+{/* CREATE SLOT BUTTON AND FORM */}
+<div className="mb-6">
           <button
             onClick={() => setShowForm(!showForm)}
             disabled={hasActiveSlot}
@@ -713,7 +782,6 @@ export default function SlotBooking() {
           </div>
         )}
 
-        {/* Slot Creation Form */}
         {showForm && !hasActiveSlot && (
           <div className="bg-gradient-to-br from-gray-900 to-black rounded-lg shadow-2xl p-6 sm:p-8 mb-6 border-2 border-yellow-500">
             <h2 className="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6 text-yellow-500">Create BGMI Slot</h2>
@@ -748,14 +816,13 @@ export default function SlotBooking() {
           </div>
         )}
 
-        {/* Slots List */}
+        {/* SLOTS LIST */}
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
           {slots.map((slot) => {
             const userInSlot = isUserInSlot(slot);
             const nextPosition = getNextAvailablePosition(slot);
             const isFull = !nextPosition;
             const isCreator = slot.creator_name.toLowerCase() === userName.toLowerCase();
-            // const userPosition = getPlayerPosition(slot, userName);
             const inWaitingQueue = slot.waiting_queue.includes(userName);
 
             return (
@@ -842,7 +909,6 @@ export default function SlotBooking() {
                           {playerName && <span className="text-green-500 ml-2 flex-shrink-0">✓</span>}
                         </div>
                         
-                        {/* Comment section - visible to all, editable only by the player */}
                         {playerName && (
                           <div className="mt-1 ml-20 sm:ml-24">
                             {editingComment?.slotId === slot.id && editingComment?.player === player && isCurrentPlayer ? (
@@ -894,7 +960,6 @@ export default function SlotBooking() {
                     );
                   })}
                 </div>
-
 
                 {/* Waiting Queue */}
                 <div className="border-t-2 border-yellow-600 pt-3 mb-3">
