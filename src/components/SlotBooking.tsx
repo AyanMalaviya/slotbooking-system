@@ -517,6 +517,7 @@ export default function SlotBooking() {
     <div className="min-h-screen bg-black">
       {/* Header */}
       <header className="bg-gradient-to-r from-yellow-600 via-yellow-500 to-yellow-600 text-black shadow-2xl border-b-4 border-yellow-400">
+        
         <div className="container mx-auto px-4 py-4">
           {/* Top Row - Logo, Title and User Info */}
           <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-3">
