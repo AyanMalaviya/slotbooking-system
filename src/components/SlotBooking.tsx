@@ -10,6 +10,17 @@ export default function SlotBooking() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hasActiveSlot, setHasActiveSlot] = useState(false);
 
+  // Edit slot state
+  const [editingSlotId, setEditingSlotId] = useState<string | null>(null);
+  const [editTime, setEditTime] = useState('');
+
+  // Comment states
+  const [editingComment, setEditingComment] = useState<{slotId: string, player: string} | null>(null);
+  const [commentText, setCommentText] = useState('');
+
+  // Waiting queue state
+  const [showWaitingQueue, setShowWaitingQueue] = useState<string | null>(null);
+
   // Login/Register states
   const [isLoginMode, setIsLoginMode] = useState(true);
   const [loginUsername, setLoginUsername] = useState('');
@@ -25,7 +36,6 @@ export default function SlotBooking() {
   });
 
   useEffect(() => {
-    // Check if user is logged in
     const storedUsername = localStorage.getItem('bgmi_username');
     const storedAuth = localStorage.getItem('bgmi_authenticated');
     
@@ -36,12 +46,10 @@ export default function SlotBooking() {
 
     fetchSlots();
 
-    // Auto-refresh every minute
     const interval = setInterval(() => {
       fetchSlots();
     }, 60000);
 
-    // Subscribe to realtime changes
     const channel = supabase
       .channel('slots-changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'slots' }, () => {
@@ -87,14 +95,12 @@ export default function SlotBooking() {
     if (data) setSlots(data);
   };
 
-  // Handle Login
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setAuthLoading(true);
 
     try {
-      // Check if user exists and password matches
       const { data, error } = await supabase
         .from('user_credentials')
         .select('*')
@@ -107,14 +113,12 @@ export default function SlotBooking() {
         return;
       }
 
-      // Simple password check (in production, use proper hashing like bcrypt)
       if (data.password_hash !== loginPassword) {
         setAuthError('Incorrect password!');
         setAuthLoading(false);
         return;
       }
 
-      // Login successful
       localStorage.setItem('bgmi_username', loginUsername);
       localStorage.setItem('bgmi_authenticated', 'true');
       setUserName(loginUsername);
@@ -127,13 +131,11 @@ export default function SlotBooking() {
     }
   };
 
-  // Handle Registration
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError('');
     setAuthLoading(true);
 
-    // Validation
     if (registerPassword !== confirmPassword) {
       setAuthError('Passwords do not match!');
       setAuthLoading(false);
@@ -153,7 +155,6 @@ export default function SlotBooking() {
     }
 
     try {
-      // Check if username already exists
       const { data: existingUser } = await supabase
         .from('user_credentials')
         .select('username')
@@ -166,17 +167,15 @@ export default function SlotBooking() {
         return;
       }
 
-      // Register new user (in production, hash the password properly)
       const { error } = await supabase
         .from('user_credentials')
         .insert({
           username: registerUsername.toLowerCase(),
-          password_hash: registerPassword, // In production, use bcrypt or similar
+          password_hash: registerPassword,
         });
 
       if (error) throw error;
 
-      // Auto-login after registration
       localStorage.setItem('bgmi_username', registerUsername);
       localStorage.setItem('bgmi_authenticated', 'true');
       setUserName(registerUsername);
@@ -189,7 +188,6 @@ export default function SlotBooking() {
     }
   };
 
-  // Handle Logout
   const handleLogout = () => {
     localStorage.removeItem('bgmi_username');
     localStorage.removeItem('bgmi_authenticated');
@@ -219,7 +217,11 @@ export default function SlotBooking() {
         player2: '',
         player3: '',
         player4: '',
-        substitute: '',
+        player1_comment: '',
+        player2_comment: '',
+        player3_comment: '',
+        player4_comment: '',
+        waiting_queue: [],
       });
 
       if (error) throw error;
@@ -236,21 +238,165 @@ export default function SlotBooking() {
     }
   };
 
-  const handleCancelSlot = async () => {
-    const userSlot = slots.find(
-      (slot) => slot.creator_name.toLowerCase() === userName.toLowerCase() && slot.status === 'active'
-    );
+  // Leave slot - only remove user's name
+  const handleLeaveSlot = async (slotId: string) => {
+    const slot = slots.find((s) => s.id === slotId);
+    if (!slot) return;
 
-    if (!userSlot) return;
+    if (slot.creator_name.toLowerCase() === userName.toLowerCase()) {
+      alert('You cannot leave your own slot! Use "Remove Me" to leave as a player.');
+      return;
+    }
 
-    const confirmCancel = window.confirm('Are you sure you want to cancel your slot?');
-    if (!confirmCancel) return;
+    const confirmLeave = window.confirm('Are you sure you want to leave this slot?');
+    if (!confirmLeave) return;
+
+    try {
+      const updates: any = {};
+      const lowerUserName = userName.toLowerCase();
+      
+      if (slot.player2.toLowerCase() === lowerUserName) {
+        updates.player2 = '';
+        updates.player2_comment = '';
+      }
+      if (slot.player3.toLowerCase() === lowerUserName) {
+        updates.player3 = '';
+        updates.player3_comment = '';
+      }
+      if (slot.player4.toLowerCase() === lowerUserName) {
+        updates.player4 = '';
+        updates.player4_comment = '';
+      }
+
+      const { error } = await supabase
+        .from('slots')
+        .update(updates)
+        .eq('id', slotId);
+
+      if (error) throw error;
+      fetchSlots();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Creator can remove themselves from player1
+  const handleRemoveSelfAsCreator = async (slotId: string) => {
+    const confirmRemove = window.confirm('Remove yourself as Player 1? The slot will remain active.');
+    if (!confirmRemove) return;
+
+    try {
+      const { error } = await supabase
+        .from('slots')
+        .update({ 
+          player1: '',
+          player1_comment: ''
+        })
+        .eq('id', slotId);
+
+      if (error) throw error;
+      fetchSlots();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Delete entire slot (only creator)
+  const handleDeleteSlot = async (slotId: string) => {
+    const confirmDelete = window.confirm('Delete this entire slot? This cannot be undone!');
+    if (!confirmDelete) return;
 
     try {
       const { error } = await supabase
         .from('slots')
         .update({ status: 'cancelled' })
-        .eq('id', userSlot.id);
+        .eq('id', slotId);
+
+      if (error) throw error;
+      fetchSlots();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Edit slot time
+  const handleEditSlotTime = async (slotId: string) => {
+    if (!editTime) return;
+
+    try {
+      const today = new Date();
+      const [hours, minutes] = editTime.split(':');
+      today.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+      const { error } = await supabase
+        .from('slots')
+        .update({ start_time: today.toISOString() })
+        .eq('id', slotId);
+
+      if (error) throw error;
+      
+      setEditingSlotId(null);
+      setEditTime('');
+      fetchSlots();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Save comment
+  const handleSaveComment = async (slotId: string, player: string) => {
+    try {
+      const commentField = `${player}_comment`;
+      const { error } = await supabase
+        .from('slots')
+        .update({ [commentField]: commentText })
+        .eq('id', slotId);
+
+      if (error) throw error;
+      
+      setEditingComment(null);
+      setCommentText('');
+      fetchSlots();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Join waiting queue
+  const handleJoinWaitingQueue = async (slotId: string) => {
+    const slot = slots.find((s) => s.id === slotId);
+    if (!slot) return;
+
+    if (slot.waiting_queue.includes(userName)) {
+      alert('You are already in the waiting queue!');
+      return;
+    }
+
+    try {
+      const updatedQueue = [...slot.waiting_queue, userName];
+      const { error } = await supabase
+        .from('slots')
+        .update({ waiting_queue: updatedQueue })
+        .eq('id', slotId);
+
+      if (error) throw error;
+      fetchSlots();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  // Leave waiting queue
+  const handleLeaveWaitingQueue = async (slotId: string) => {
+    const slot = slots.find((s) => s.id === slotId);
+    if (!slot) return;
+
+    try {
+      const updatedQueue = slot.waiting_queue.filter(name => name !== userName);
+      const { error } = await supabase
+        .from('slots')
+        .update({ waiting_queue: updatedQueue })
+        .eq('id', slotId);
 
       if (error) throw error;
       fetchSlots();
@@ -265,8 +411,7 @@ export default function SlotBooking() {
       slot.player1.toLowerCase() === lowerUserName ||
       slot.player2.toLowerCase() === lowerUserName ||
       slot.player3.toLowerCase() === lowerUserName ||
-      slot.player4.toLowerCase() === lowerUserName ||
-      slot.substitute.toLowerCase() === lowerUserName
+      slot.player4.toLowerCase() === lowerUserName
     );
   };
 
@@ -274,7 +419,6 @@ export default function SlotBooking() {
     if (!slot.player2) return 'player2';
     if (!slot.player3) return 'player3';
     if (!slot.player4) return 'player4';
-    if (!slot.substitute) return 'substitute';
     return null;
   };
 
@@ -306,39 +450,6 @@ export default function SlotBooking() {
     }
   };
 
-  const handleLeaveSlot = async (slotId: string) => {
-    const slot = slots.find((s) => s.id === slotId);
-    if (!slot) return;
-
-    if (slot.creator_name.toLowerCase() === userName.toLowerCase()) {
-      alert('You cannot leave your own slot! Cancel the slot instead.');
-      return;
-    }
-
-    const confirmLeave = window.confirm('Are you sure you want to leave this slot?');
-    if (!confirmLeave) return;
-
-    try {
-      const updates: any = {};
-      const lowerUserName = userName.toLowerCase();
-      
-      if (slot.player2.toLowerCase() === lowerUserName) updates.player2 = '';
-      if (slot.player3.toLowerCase() === lowerUserName) updates.player3 = '';
-      if (slot.player4.toLowerCase() === lowerUserName) updates.player4 = '';
-      if (slot.substitute.toLowerCase() === lowerUserName) updates.substitute = '';
-
-      const { error } = await supabase
-        .from('slots')
-        .update(updates)
-        .eq('id', slotId);
-
-      if (error) throw error;
-      fetchSlots();
-    } catch (err: any) {
-      alert(err.message);
-    }
-  };
-
   const getCurrentTime = () => {
     const now = new Date();
     return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
@@ -353,6 +464,15 @@ export default function SlotBooking() {
       day: 'numeric' 
     });
   };
+
+  // const getPlayerPosition = (slot: Slot, username: string): string | null => {
+  //   const lowerUserName = username.toLowerCase();
+  //   if (slot.player1.toLowerCase() === lowerUserName) return 'player1';
+  //   if (slot.player2.toLowerCase() === lowerUserName) return 'player2';
+  //   if (slot.player3.toLowerCase() === lowerUserName) return 'player3';
+  //   if (slot.player4.toLowerCase() === lowerUserName) return 'player4';
+  //   return null;
+  // };
 
   // Login/Register Screen
   if (!isAuthenticated) {
@@ -373,7 +493,6 @@ export default function SlotBooking() {
             {isLoginMode ? 'Login to Continue' : 'Create Your Account'}
           </p>
 
-          {/* Toggle Login/Register */}
           <div className="flex gap-2 mb-6">
             <button
               onClick={() => {
@@ -403,7 +522,6 @@ export default function SlotBooking() {
             </button>
           </div>
 
-          {/* Login Form */}
           {isLoginMode ? (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
@@ -449,7 +567,6 @@ export default function SlotBooking() {
               </button>
             </form>
           ) : (
-            /* Register Form */
             <form onSubmit={handleRegister} className="space-y-4">
               <div>
                 <label className="block text-sm font-bold text-yellow-400 mb-2">
@@ -517,9 +634,7 @@ export default function SlotBooking() {
     <div className="min-h-screen bg-black">
       {/* Header */}
       <header className="bg-gradient-to-r from-yellow-600 via-yellow-500 to-yellow-600 text-black shadow-2xl border-b-4 border-yellow-400">
-        
         <div className="container mx-auto px-4 py-4">
-          {/* Top Row - Logo, Title and User Info */}
           <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-3 mb-3">
             <div className="flex items-center gap-3">
               <img 
@@ -550,14 +665,12 @@ export default function SlotBooking() {
             </div>
           </div>
 
-          {/* Date Display */}
           <div className="bg-black bg-opacity-20 rounded-lg px-3 py-2 mb-3">
             <p className="text-xs sm:text-sm text-yellow-900 font-semibold text-center">
               {getTodayFormatted()}
             </p>
           </div>
           
-          {/* WhatsApp Group Button */}
           <div className="flex justify-center">
             <a
               href="https://chat.whatsapp.com/LUgeb25JcgR14sPXytyjV5"
@@ -579,8 +692,8 @@ export default function SlotBooking() {
       </header>
 
       <div className="container mx-auto p-4 sm:p-6">
-        {/* Create/Cancel Slot Buttons */}
-        <div className="mb-6 flex flex-col sm:flex-row gap-3">
+        {/* Create Slot Button */}
+        <div className="mb-6">
           <button
             onClick={() => setShowForm(!showForm)}
             disabled={hasActiveSlot}
@@ -592,20 +705,11 @@ export default function SlotBooking() {
           >
             {showForm ? 'Cancel' : '+ Create New Slot'}
           </button>
-
-          {hasActiveSlot && (
-            <button
-              onClick={handleCancelSlot}
-              className="bg-gradient-to-r from-red-600 to-red-700 text-white px-6 py-3 rounded-lg font-bold hover:from-red-500 hover:to-red-600 transition shadow-lg border-2 border-red-500 text-base"
-            >
-              Cancel My Slot
-            </button>
-          )}
         </div>
 
         {hasActiveSlot && (
           <div className="mb-6 bg-gradient-to-r from-yellow-600 to-yellow-500 text-black p-3 rounded-lg font-bold border-2 border-yellow-400 text-sm sm:text-base">
-            You already have an active slot. Cancel it to create a new one.
+            You already have an active slot. Delete it to create a new one.
           </div>
         )}
 
@@ -645,113 +749,248 @@ export default function SlotBooking() {
         )}
 
         {/* Slots List */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
           {slots.map((slot) => {
             const userInSlot = isUserInSlot(slot);
             const nextPosition = getNextAvailablePosition(slot);
             const isFull = !nextPosition;
             const isCreator = slot.creator_name.toLowerCase() === userName.toLowerCase();
+            // const userPosition = getPlayerPosition(slot, userName);
+            const inWaitingQueue = slot.waiting_queue.includes(userName);
 
             return (
               <div
                 key={slot.id}
-                className={`rounded-lg shadow-2xl p-4 sm:p-6 border-2 ${
-                  slot.status === 'cancelled' 
-                    ? 'bg-gray-800 border-gray-600' 
-                    : 'bg-gradient-to-br from-gray-900 to-black border-yellow-500'
-                }`}
+                className="rounded-lg shadow-2xl p-4 sm:p-6 border-2 bg-gradient-to-br from-gray-900 to-black border-yellow-500"
               >
-                <div className="flex justify-between items-start mb-3 sm:mb-4">
-                  <h3 className="text-xl sm:text-2xl font-bold text-yellow-400">
-                    {new Date(slot.start_time).toLocaleTimeString('en-IN', {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    })}
-                  </h3>
-                  <span
-                    className={`px-2 sm:px-3 py-1 rounded-full text-xs font-bold ${
-                      slot.status === 'active'
-                        ? 'bg-yellow-500 text-black'
-                        : 'bg-red-600 text-white'
-                    }`}
-                  >
-                    {slot.status === 'active' ? 'ACTIVE' : 'CANCELLED'}
+                {/* Time and Status */}
+                <div className="flex justify-between items-start mb-3">
+                  {editingSlotId === slot.id ? (
+                    <div className="flex gap-2 flex-1">
+                      <input
+                        type="time"
+                        value={editTime}
+                        onChange={(e) => setEditTime(e.target.value)}
+                        className="px-2 py-1 bg-black border-2 border-yellow-500 rounded text-yellow-400 text-sm"
+                      />
+                      <button
+                        onClick={() => handleEditSlotTime(slot.id)}
+                        className="bg-green-600 text-white px-2 py-1 rounded text-xs"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={() => {
+                          setEditingSlotId(null);
+                          setEditTime('');
+                        }}
+                        className="bg-gray-600 text-white px-2 py-1 rounded text-xs"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-xl sm:text-2xl font-bold text-yellow-400">
+                        {new Date(slot.start_time).toLocaleTimeString('en-IN', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </h3>
+                      {isCreator && (
+                        <button
+                          onClick={() => {
+                            setEditingSlotId(slot.id);
+                            const time = new Date(slot.start_time);
+                            setEditTime(`${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`);
+                          }}
+                          className="text-yellow-400 hover:text-yellow-300 text-xs"
+                        >
+                          ✏️ Edit
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  <span className="px-2 sm:px-3 py-1 rounded-full text-xs font-bold bg-yellow-500 text-black">
+                    ACTIVE
                   </span>
                 </div>
 
-                <div className="mb-3 sm:mb-4 bg-yellow-900 bg-opacity-20 p-2 sm:p-3 rounded-lg border border-yellow-600">
+                <div className="mb-3 bg-yellow-900 bg-opacity-20 p-2 rounded-lg border border-yellow-600">
                   <p className="text-yellow-300 font-bold text-xs sm:text-sm">Created by: {slot.creator_name}</p>
                 </div>
 
-                <div className="space-y-2 text-xs sm:text-sm mb-3 sm:mb-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center flex-1 min-w-0">
-                      <span className="font-bold text-yellow-400 w-20 sm:w-28 flex-shrink-0">Player 1:</span>
-                      <span className="text-white font-semibold truncate ml-2">{slot.player1 || '—'}</span>
-                    </div>
-                    {slot.player1 && <span className="text-green-500 ml-2 flex-shrink-0">✓</span>}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center flex-1 min-w-0">
-                      <span className="font-bold text-yellow-400 w-20 sm:w-28 flex-shrink-0">Player 2:</span>
-                      <span className="text-white font-semibold truncate ml-2">{slot.player2 || '—'}</span>
-                    </div>
-                    {slot.player2 && <span className="text-green-500 ml-2 flex-shrink-0">✓</span>}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center flex-1 min-w-0">
-                      <span className="font-bold text-yellow-400 w-20 sm:w-28 flex-shrink-0">Player 3:</span>
-                      <span className="text-white font-semibold truncate ml-2">{slot.player3 || '—'}</span>
-                    </div>
-                    {slot.player3 && <span className="text-green-500 ml-2 flex-shrink-0">✓</span>}
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center flex-1 min-w-0">
-                      <span className="font-bold text-yellow-400 w-20 sm:w-28 flex-shrink-0">Player 4:</span>
-                      <span className="text-white font-semibold truncate ml-2">{slot.player4 || '—'}</span>
-                    </div>
-                    {slot.player4 && <span className="text-green-500 ml-2 flex-shrink-0">✓</span>}
-                  </div>
-                  <div className="flex items-center justify-between border-t-2 border-yellow-600 pt-2">
-                    <div className="flex items-center flex-1 min-w-0">
-                      <span className="font-bold text-yellow-300 w-20 sm:w-28 flex-shrink-0">Substitute:</span>
-                      <span className="text-yellow-100 font-semibold truncate ml-2">{slot.substitute || '—'}</span>
-                    </div>
-                    {slot.substitute && <span className="text-green-500 ml-2 flex-shrink-0">✓</span>}
-                  </div>
+                {/* Players */}
+                <div className="space-y-2 text-xs sm:text-sm mb-3">
+                  {(['player1', 'player2', 'player3', 'player4'] as const).map((player, index) => {
+                    const playerName = slot[player];
+                    const commentKey = `${player}_comment` as keyof Slot;
+                    const comment = slot[commentKey] as string;
+                    const isCurrentPlayer = playerName.toLowerCase() === userName.toLowerCase();
+
+                    return (
+                      <div key={player}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center flex-1 min-w-0">
+                            <span className="font-bold text-yellow-400 w-20 sm:w-24 flex-shrink-0">
+                              Player {index + 1}:
+                            </span>
+                            <span className="text-white font-semibold truncate ml-2">
+                              {playerName || '—'}
+                            </span>
+                          </div>
+                          {playerName && <span className="text-green-500 ml-2 flex-shrink-0">✓</span>}
+                        </div>
+                        
+                        {/* Comment section - visible to all, editable only by the player */}
+                        {playerName && (
+                          <div className="mt-1 ml-20 sm:ml-24">
+                            {editingComment?.slotId === slot.id && editingComment?.player === player && isCurrentPlayer ? (
+                              <div className="flex gap-1">
+                                <input
+                                  type="text"
+                                  value={commentText}
+                                  onChange={(e) => setCommentText(e.target.value)}
+                                  placeholder="Add your note..."
+                                  className="flex-1 px-2 py-1 bg-black border border-yellow-600 rounded text-white text-xs"
+                                />
+                                <button
+                                  onClick={() => handleSaveComment(slot.id, player)}
+                                  className="bg-green-600 text-white px-2 py-1 rounded text-xs"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingComment(null);
+                                    setCommentText('');
+                                  }}
+                                  className="bg-gray-600 text-white px-2 py-1 rounded text-xs"
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-400 text-xs italic">
+                                  💬 {comment || 'No note'}
+                                </span>
+                                {isCurrentPlayer && (
+                                  <button
+                                    onClick={() => {
+                                      setEditingComment({ slotId: slot.id, player });
+                                      setCommentText(comment || '');
+                                    }}
+                                    className="text-yellow-400 hover:text-yellow-300 text-xs"
+                                  >
+                                    ✏️ Edit
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
 
-                {/* Join/Leave Buttons */}
-                {slot.status === 'active' && !isCreator && (
-                  <div className="mt-3 sm:mt-4">
-                    {userInSlot ? (
-                      <button
-                        onClick={() => handleLeaveSlot(slot.id)}
-                        className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white py-2 rounded-lg font-bold hover:from-red-500 hover:to-red-600 transition shadow-lg border-2 border-red-500 text-sm sm:text-base"
-                      >
-                        Leave Slot
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => handleJoinSlot(slot.id)}
-                        disabled={isFull}
-                        className={`w-full py-2 rounded-lg font-bold transition shadow-lg border-2 text-sm sm:text-base ${
-                          isFull
-                            ? 'bg-gray-700 text-gray-400 border-gray-600 cursor-not-allowed'
-                            : 'bg-gradient-to-r from-green-600 to-green-700 text-white hover:from-green-500 hover:to-green-600 border-green-500'
-                        }`}
-                      >
-                        {isFull ? 'Slot Full' : 'Join Slot'}
-                      </button>
-                    )}
-                  </div>
-                )}
 
-                {slot.status === 'active' && isCreator && (
-                  <div className="mt-3 sm:mt-4 bg-yellow-600 bg-opacity-20 p-2 rounded-lg border border-yellow-600 text-center">
-                    <p className="text-yellow-300 font-bold text-xs">Your Slot</p>
+                {/* Waiting Queue */}
+                <div className="border-t-2 border-yellow-600 pt-3 mb-3">
+                  <div className="flex justify-between items-center mb-2">
+                    <span className="font-bold text-yellow-300 text-sm">Waiting Queue ({slot.waiting_queue.length})</span>
+                    <button
+                      onClick={() => setShowWaitingQueue(showWaitingQueue === slot.id ? null : slot.id)}
+                      className="text-yellow-400 text-xs hover:text-yellow-300"
+                    >
+                      {showWaitingQueue === slot.id ? 'Hide' : 'Show'}
+                    </button>
                   </div>
-                )}
+                  
+                  {showWaitingQueue === slot.id && (
+                    <div className="bg-gray-800 rounded p-2 mb-2">
+                      {slot.waiting_queue.length === 0 ? (
+                        <p className="text-gray-400 text-xs">No one in queue</p>
+                      ) : (
+                        <ul className="space-y-1">
+                          {slot.waiting_queue.map((name, idx) => (
+                            <li key={idx} className="text-yellow-100 text-xs flex justify-between items-center">
+                              <span>{idx + 1}. {name}</span>
+                              {name === userName && (
+                                <button
+                                  onClick={() => handleLeaveWaitingQueue(slot.id)}
+                                  className="text-red-400 hover:text-red-300 text-xs"
+                                >
+                                  Remove
+                                </button>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {!inWaitingQueue && (
+                    <button
+                      onClick={() => handleJoinWaitingQueue(slot.id)}
+                      className="w-full bg-purple-600 hover:bg-purple-700 text-white py-1 rounded text-xs font-bold"
+                    >
+                      Join Waiting Queue
+                    </button>
+                  )}
+                </div>
+
+                {/* Action Buttons */}
+                <div className="space-y-2">
+                  {!isCreator && !userInSlot && !isFull && (
+                    <button
+                      onClick={() => handleJoinSlot(slot.id)}
+                      className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white py-2 rounded-lg font-bold hover:from-green-500 hover:to-green-600 transition shadow-lg border-2 border-green-500 text-sm"
+                    >
+                      Join Slot
+                    </button>
+                  )}
+
+                  {!isCreator && userInSlot && (
+                    <button
+                      onClick={() => handleLeaveSlot(slot.id)}
+                      className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white py-2 rounded-lg font-bold hover:from-red-500 hover:to-red-600 transition shadow-lg border-2 border-red-500 text-sm"
+                    >
+                      Leave Slot
+                    </button>
+                  )}
+
+                  {isCreator && (
+                    <div className="space-y-2">
+                      <div className="bg-yellow-600 bg-opacity-20 p-2 rounded-lg border border-yellow-600 text-center">
+                        <p className="text-yellow-300 font-bold text-xs">Your Slot</p>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveSelfAsCreator(slot.id)}
+                        className="w-full bg-orange-600 hover:bg-orange-700 text-white py-2 rounded-lg font-bold transition text-sm"
+                      >
+                        Remove Me as Player 1
+                      </button>
+                      <button
+                        onClick={() => handleDeleteSlot(slot.id)}
+                        className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white py-2 rounded-lg font-bold hover:from-red-500 hover:to-red-600 transition shadow-lg border-2 border-red-500 text-sm"
+                      >
+                        Delete Entire Slot
+                      </button>
+                    </div>
+                  )}
+
+                  {!isCreator && !userInSlot && isFull && (
+                    <button
+                      disabled
+                      className="w-full bg-gray-700 text-gray-400 border-gray-600 cursor-not-allowed py-2 rounded-lg font-bold text-sm"
+                    >
+                      Slot Full
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
